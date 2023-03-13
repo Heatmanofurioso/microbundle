@@ -40,7 +40,7 @@ import { getConfigFromPkgJson, getName } from './lib/package-info';
 import { shouldCssModules, cssModulesConfig } from './lib/css-modules';
 import { getConfigOverride } from './lib/config-override';
 import { EOL } from 'os';
-import cssnano from "cssnano";
+import cssnano from 'cssnano';
 import svgr from '@svgr/rollup';
 import smartAsset from 'rollup-plugin-smart-asset';
 
