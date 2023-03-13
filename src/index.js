@@ -1,8 +1,8 @@
 import fs from 'fs';
-import { resolve, relative, dirname, basename, extname } from 'path';
+import { basename, dirname, extname, relative, resolve } from 'path';
 import camelCase from 'camelcase';
 import escapeStringRegexp from 'escape-string-regexp';
-import { blue, yellow, red } from 'kleur';
+import { blue, red, yellow } from 'kleur';
 import { map, series } from 'asyncro';
 import glob from 'tiny-glob/sync';
 import autoprefixer from 'autoprefixer';
@@ -26,8 +26,8 @@ import {
 	isDir,
 	isFile,
 	isTruthy,
-	stdout,
 	removeScope,
+	stdout,
 } from './utils';
 import { getSizeInfo } from './lib/compressed-size';
 import { normalizeMinifyOptions } from './lib/terser';
@@ -37,7 +37,7 @@ import {
 	toReplacementExpression,
 } from './lib/option-normalization';
 import { getConfigFromPkgJson, getName } from './lib/package-info';
-import { shouldCssModules, cssModulesConfig } from './lib/css-modules';
+import { cssModulesConfig, shouldCssModules } from './lib/css-modules';
 import { getConfigOverride } from './lib/config-override';
 import { EOL } from 'os';
 import cssnano from 'cssnano';
@@ -262,7 +262,7 @@ function getDeclarationDir({ options, pkg }) {
 }
 
 async function getEntries({ input, cwd }) {
-	let entries = (
+	return (
 		await map([].concat(input), async file => {
 			file = resolve(cwd, file);
 			if (await isDir(file)) {
@@ -271,7 +271,6 @@ async function getEntries({ input, cwd }) {
 			return file;
 		})
 	).filter((item, i, arr) => arr.indexOf(item) === i);
-	return entries;
 }
 
 function replaceName(filename, name) {
