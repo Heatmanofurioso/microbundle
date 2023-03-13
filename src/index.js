@@ -38,10 +38,25 @@ import {
 } from './lib/option-normalization';
 import { getConfigFromPkgJson, getName } from './lib/package-info';
 import { shouldCssModules, cssModulesConfig } from './lib/css-modules';
+import { getConfigOverride } from './lib/config-override';
 import { EOL } from 'os';
+import cssnano from "cssnano";
+import svgr from '@svgr/rollup';
+import smartAsset from 'rollup-plugin-smart-asset';
 
 // Extensions to use when resolving modules
-const EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.es6', '.es', '.mjs'];
+const EXTENSIONS = [
+	'.ts',
+	'.tsx',
+	'.js',
+	'.jsx',
+	'.es6',
+	'.es',
+	'.mjs',
+	'.jpg',
+	'.png',
+	'.svg',
+];
 
 const WATCH_OPTS = {
 	exclude: 'node_modules/**',
@@ -111,7 +126,7 @@ export default async function microbundle(inputOptions) {
 	for (let i = 0; i < options.entries.length; i++) {
 		for (let j = 0; j < formats.length; j++) {
 			steps.push(
-				createConfig(options, options.entries[i], formats[j], j === 0),
+				await createConfig(options, options.entries[i], formats[j], j === 0),
 			);
 		}
 	}
@@ -323,8 +338,9 @@ function getMain({ options, entry, format }) {
 // shebang cache map because the transform only gets run once
 const shebang = {};
 
-function createConfig(options, entry, format, writeMeta) {
+async function createConfig(options, entry, format, writeMeta) {
 	let { pkg } = options;
+	const context = { options, entry, format, writeMeta };
 
 	/** @type {(string|RegExp)[]} */
 	let external = ['dns', 'fs', 'path', 'url'];
@@ -409,6 +425,7 @@ function createConfig(options, entry, format, writeMeta) {
 	let endsWithNewLine = false;
 
 	let nameCacheIndentTabs = false;
+
 	function loadNameCache() {
 		try {
 			const data = fs.readFileSync(getNameCachePath(), 'utf8');
@@ -425,13 +442,14 @@ function createConfig(options, entry, format, writeMeta) {
 			}
 		} catch (e) {}
 	}
+
 	loadNameCache();
 
 	normalizeMinifyOptions(minifyOptions);
 
 	if (nameCache === bareNameCache) nameCache = null;
 
-	/** @type {false | import('rollup').RollupCache} */
+	/** @type {false | import("rollup").RollupCache} */
 	let cache;
 	if (modern) cache = false;
 
@@ -448,8 +466,10 @@ function createConfig(options, entry, format, writeMeta) {
 		);
 	}
 
+	const configOverride = await getConfigOverride(context);
+
 	let config = {
-		/** @type {import('rollup').InputOptions} */
+		/** @type {import("rollup").InputOptions} */
 		inputOptions: {
 			// disable Rollup's cache for modern builds to prevent re-use of legacy transpiled modules:
 			cache,
@@ -486,40 +506,53 @@ function createConfig(options, entry, format, writeMeta) {
 
 			plugins: []
 				.concat(
-					postcss({
-						plugins: [autoprefixer()],
-						autoModules: shouldCssModules(options),
-						modules: cssModulesConfig(options),
-						// only write out CSS for the first bundle (avoids pointless extra files):
-						inject: false,
-						extract:
-							!!writeMeta &&
-							options.css !== 'inline' &&
-							absMain.replace(EXTENSION, '.css'),
-						minimize: options.compress,
-						sourceMap: options.sourcemap && options.css !== 'inline',
-					}),
-					moduleAliases.length > 0 &&
-						alias({
-							// @TODO: this is no longer supported, but didn't appear to be required?
-							// resolve: EXTENSIONS,
-							entries: moduleAliases,
+					postcss(
+						configOverride.pluginConfig('postcss', {
+							plugins: [
+								autoprefixer(),
+								options.compress !== false &&
+									cssnano({
+										preset: 'default',
+									}),
+							].filter(Boolean),
+							autoModules: shouldCssModules(options),
+							modules: cssModulesConfig(options),
+							// only write out CSS for the first bundle (avoids pointless extra files):
+							inject: false,
+							extract: !!writeMeta,
 						}),
-					nodeResolve({
-						mainFields: ['module', 'jsnext', 'main'],
-						browser: options.target !== 'node',
-						exportConditions: [options.target === 'node' ? 'node' : 'browser'],
-						// defaults + .jsx
-						extensions: ['.mjs', '.js', '.jsx', '.json', '.node'],
-						preferBuiltins: options.target === 'node',
+					),
+					moduleAliases.length > 0 &&
+						alias(
+							configOverride.pluginConfig('alias', {
+								// @TODO: this is no longer supported, but didn't appear to be required?
+								// resolve: EXTENSIONS,
+								entries: moduleAliases,
+							}),
+						),
+					nodeResolve(
+						configOverride.pluginConfig('nodeResolve', {
+							mainFields: ['module', 'jsnext', 'main'],
+							browser: options.target !== 'node',
+							// defaults + .jsx
+							extensions: ['.mjs', '.js', '.jsx', '.json', '.node'],
+							preferBuiltins: options.target === 'node',
+						}),
+					),
+					commonjs(
+						configOverride.pluginConfig('commonjs', {
+							// use a regex to make sure to include eventual hoisted packages
+							include: /\/node_modules\//,
+						}),
+					),
+					json(configOverride.pluginConfig('json', {})),
+					smartAsset({
+						url: 'copy',
+						useHash: true,
+						keepName: true,
+						keepImport: true,
 					}),
-					commonjs({
-						// use a regex to make sure to include eventual hoisted packages
-						include: /\/node_modules\//,
-						esmExternals: false,
-						requireReturnsDefault: 'namespace',
-					}),
-					json(),
+					svgr(),
 					{
 						// We have to remove shebang so it doesn't end up in the middle of the code somewhere
 						transform: code => ({
@@ -537,6 +570,7 @@ function createConfig(options, entry, format, writeMeta) {
 								'typescript',
 							) || 'typescript'),
 							cacheRoot: `./node_modules/.cache/.rts2_cache_${format}`,
+							objectHashIgnoreUnknownHack: true,
 							useTsconfigDeclarationDir: true,
 							tsconfigDefaults: {
 								compilerOptions: {
@@ -547,8 +581,8 @@ function createConfig(options, entry, format, writeMeta) {
 									...(options.generateTypes !== false && {
 										declarationDir: getDeclarationDir({ options, pkg }),
 									}),
-									jsx: 'preserve',
-									jsxFactory: options.jsx,
+									jsx: 'preserve' | 'react',
+									jsxFactory: options.jsx || 'React.createElement',
 									jsxFragmentFactory: options.jsxFragment,
 								},
 								files: options.entries,
@@ -587,7 +621,7 @@ function createConfig(options, entry, format, writeMeta) {
 							modern,
 							compress: options.compress !== false,
 							targets: options.target === 'node' ? { node: '12' } : undefined,
-							pragma: options.jsx,
+							pragma: options.jsx || 'React.createElement',
 							pragmaFrag: options.jsxFragment,
 							typescript: !!useTypescript,
 							jsxImportSource: options.jsxImportSource || false,
@@ -645,7 +679,7 @@ function createConfig(options, entry, format, writeMeta) {
 					// NOTE: OMT only works with amd and esm
 					// Source: https://github.com/surma/rollup-plugin-off-main-thread#config
 					useWorkerLoader && (format === 'es' || modern) && OMT(),
-					/** @type {import('rollup').Plugin} */
+					/** @type {import("rollup").Plugin} */
 					({
 						name: 'postprocessing',
 						// Rollup 2 injects globalThis, which is nice, but doesn't really make sense for Microbundle.
@@ -681,7 +715,7 @@ function createConfig(options, entry, format, writeMeta) {
 				.filter(Boolean),
 		},
 
-		/** @type {import('rollup').OutputOptions} */
+		/** @type {import("rollup").OutputOptions} */
 		outputOptions: {
 			paths: outputAliases,
 			globals,
