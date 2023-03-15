@@ -105,7 +105,7 @@
 		"postcss": "^8.2.1",
 		"pretty-bytes": "^5.4.1",
 		"resolve-from": "^5.0.0",
-		"rollup": "^2.35.1",
+		"rollup": "^2.79.1",
 		"rollup-plugin-bundle-size": "^1.0.3",
 		"rollup-plugin-postcss": "^4.0.0",
 		"rollup-plugin-smart-asset": "^2.1.2",

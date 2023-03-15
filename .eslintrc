@@ -14,9 +14,6 @@
     "require-atomic-updates": "off"
   },
   "settings": {
-    "react": {
-      "version": "16.6"
-    }
   },
   "ignorePatterns": [
     "dist"
